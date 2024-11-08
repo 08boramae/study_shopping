@@ -1,6 +1,5 @@
-from datetime import datetime, timedelta
-
-from dns.dnssecalgs import algorithms
+import requests
+from datetime import datetime
 from fastapi import FastAPI, Form, Cookie
 from typing import Annotated
 from model import model
@@ -10,6 +9,8 @@ import sqlite3
 app = FastAPI()
 conn = sqlite3.connect('./database', check_same_thread=False)
 SECRET = "VERYSECRETCODEYEAH"
+
+CARD_SERVER_URL = "http://127.0.0.1:10000/"
 
 def init():
     cur = conn.cursor()
@@ -23,26 +24,31 @@ def init():
         CREATE TABLE IF NOT EXISTS cart(
         id TEXT,
         item INTEGER UNIQUE,
-        count INTEGER
+        count INTEGER,
+        price INTEGER
         ) 
     ''')
     conn.commit()
 
+def get_userid_from_jwt(session):
+    id = jwt.decode(session, SECRET, algorithms=["HS256"])["id"]
+    return id
+
 def add_cart(data, session):
     try:
         cur = conn.cursor()
-        id = jwt.decode(session, SECRET, algorithms=["HS256"])["id"] # TODO : JWT 구조에 따라 id 가져오기
-        cur.execute("INSERT INTO cart (id, item, count) VALUES (?, ?, ?) ON CONFLICT(item) DO UPDATE SET count = count + excluded.count", (id, data.product_id, data.count))
+        id = get_userid_from_jwt(session)
+        cur.execute("INSERT INTO cart (id, item, count, price) VALUES (?, ?, ?, ?) ON CONFLICT(item) DO UPDATE SET count = count + excluded.count and price = price + (price * excluded.count)", (id, data.product_id, data.count, product_list[data.product_id-1]["price"] * data.count))
         conn.commit()
         return 1
     except:
         return 0
 
-product_list = {
-    1: "딸기",
-    2: "고구마",
-    3: "떡볶이"
-}
+product_list = [
+    {"name": "고구마", "product_id": 1, "price":3000},
+    {"name": "딸기", "product_id": 2, "price":5000},
+    {"name": "떡볶이", "product_id": 3, "price":7000}
+]
 
 def create_new_session(id):
     zulu = datetime.utcnow()
@@ -77,6 +83,25 @@ def create_user(user_data):
         print("EXC")
         return 0
 
+def checkout(session, card_number):
+    try:
+        cur = conn.cursor()
+        id = get_userid_from_jwt(session)
+        cur.execute("SELECT price FROM cart WHERE id=?", (id, ))
+        res = cur.fetchall()
+        total_price = 0
+        for i in res:
+            total_price += i[0]
+        res_s = requests.post(CARD_SERVER_URL + "checkout", json={"card_number":str(card_number), "money":str(total_price)}).text
+        print(res_s)
+        if res_s == "1":
+            return 1
+        else:
+            return 0
+    except:
+        print("EXC")
+        return 0
+
 @app.post('/login')
 def _login(data: Annotated[model.Login, Form()]):
     if validate_user(data):
@@ -101,6 +126,13 @@ def _list(SESSION: str | None = Cookie(default=None)):
 @app.post('/addcart')
 def _addcart(data: Annotated[model.AddProductAtCart, Form(),], SESSION: str | None = Cookie(default=None)):
     if add_cart(data, SESSION):
+        return {"status":"success"}
+    else:
+        return {"status":"fail"}
+
+@app.post('/checkout')
+def _checkout(SESSION: str | None = Cookie(default=None)):
+    if checkout(SESSION, 4906100054532729):
         return {"status":"success"}
     else:
         return {"status":"fail"}
