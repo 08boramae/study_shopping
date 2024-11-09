@@ -36,9 +36,7 @@ def generate_unique_account_number():
     cur = conn.cursor()
     while True:
         account_number = int(str(random.randint(100, 999)) + '20' + str(random.randint(100000, 999999)))
-        cur.execute("SELECT account_number FROM bank_account WHERE account_number = ?",
-
-                    (account_number,))
+        cur.execute("SELECT account_number FROM bank_account WHERE account_number = ?",(account_number,))
         if cur.fetchone() is None:
             return account_number
 
